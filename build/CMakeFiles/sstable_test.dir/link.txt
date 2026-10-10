@@ -1,0 +1,1 @@
+/usr/bin/c++ -g CMakeFiles/sstable_test.dir/test.cpp.o CMakeFiles/sstable_test.dir/SSTable.cc.o CMakeFiles/sstable_test.dir/memTable.cc.o -o sstable_test 

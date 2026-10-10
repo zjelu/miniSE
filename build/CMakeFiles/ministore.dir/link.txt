@@ -1,0 +1,1 @@
+/usr/bin/c++ -g CMakeFiles/ministore.dir/memTable.cc.o CMakeFiles/ministore.dir/storeEngine.cc.o CMakeFiles/ministore.dir/WAL.cc.o CMakeFiles/ministore.dir/SSTable.cc.o -o ministore 
