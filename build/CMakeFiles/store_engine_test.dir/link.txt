@@ -1,1 +1,0 @@
-/usr/bin/c++ -g CMakeFiles/store_engine_test.dir/storeEngine_test.cpp.o CMakeFiles/store_engine_test.dir/storeEngine.cc.o CMakeFiles/store_engine_test.dir/memTable.cc.o CMakeFiles/store_engine_test.dir/WAL.cc.o CMakeFiles/store_engine_test.dir/SSTable.cc.o -o store_engine_test 

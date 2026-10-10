@@ -1,1 +1,0 @@
-/usr/bin/c++ -g CMakeFiles/restart_test.dir/restart_test.cpp.o CMakeFiles/restart_test.dir/storeEngine.cc.o CMakeFiles/restart_test.dir/memTable.cc.o CMakeFiles/restart_test.dir/WAL.cc.o CMakeFiles/restart_test.dir/SSTable.cc.o CMakeFiles/restart_test.dir/compaction.cc.o -o restart_test 

@@ -1,1 +1,0 @@
-/usr/bin/c++ -g CMakeFiles/compaction_test.dir/compaction_test.cpp.o CMakeFiles/compaction_test.dir/storeEngine.cc.o CMakeFiles/compaction_test.dir/compaction.cc.o CMakeFiles/compaction_test.dir/SSTable.cc.o CMakeFiles/compaction_test.dir/memTable.cc.o CMakeFiles/compaction_test.dir/WAL.cc.o -o compaction_test 
