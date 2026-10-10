@@ -4,6 +4,7 @@
 #include "WAL.hpp"
 #include "SSTable.hpp"
 #include "compaction.hpp"
+#include "crash_point.hpp"
 
 
 #include <sstream>
@@ -48,7 +49,7 @@ using EntryMap = std::map<std::string, Entry, std::less<>>;
     bool put(std::string key, std::string value);
     std::optional<std::string> get(std::string_view key);
     bool remove(std::string_view key);
-    PendingTable createNewTable();
+    PendingTable createNewTable(bool isCompacte = false);
     bool recover();
 
     //flush是把memtable写入磁盘
@@ -61,6 +62,7 @@ using EntryMap = std::map<std::string, Entry, std::less<>>;
      std::string formatId(uint64_t id);
 
     bool open(const std::string& dir);
+    void sortDigital(std::vector<std::filesystem::path>& files);
 
 
     //compaction合并函数

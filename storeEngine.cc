@@ -169,9 +169,16 @@ bool StoreEngine::flush() {
     return true;
 }
 
-PendingTable StoreEngine::createNewTable() {
-    const auto name =
-        "sst_" + formatId(next_file_id_++) + ".sst";
+PendingTable StoreEngine::createNewTable(bool isCompacte) {
+    
+    //com_表示这个文件已经经过合并了
+     std::string name;
+    if(isCompacte){
+        name = "com_" + formatId(next_file_id_++) + ".sst";
+    }
+    else{
+        name = "sst_" + formatId(next_file_id_++) + ".sst";
+    }
 
     const auto finalPath = table_dir_ / name;
 
@@ -249,7 +256,8 @@ bool StoreEngine::open(const std::string& dir){
         files.push_back(entry.path());
 
     }
-    std::sort(files.begin(), files.end());
+    //std::sort(files.begin(), files.end());
+    sortDigital(files);
 
 
     for(auto& file_path : files){
@@ -341,6 +349,7 @@ bool StoreEngine::compacte() {
 
     // 最后按 oldPaths 删除旧文件。
     bool cleanupOk = true;
+    size_t removed = 0;
 
     for (const auto& path : oldPaths) {
         std::error_code ec;
@@ -350,28 +359,37 @@ bool StoreEngine::compacte() {
             std::cerr << "[compaction] remove failed: "
                     << path << ": " << ec.message() << '\n';
             cleanupOk = false;
+            continue;
         }
+        ++removed;
+        if(removed == 1) crashPoint("after_first_delete");
     }
 
     if (!syncDirectory(table_dir_)) {
         cleanupOk = false;
     }
+    crashPoint("after_cleanup_sync");
 
     return cleanupOk;
 }
 
 
 bool StoreEngine::writeFile(const EntryMap& output){
-    auto pending = createNewTable();
+    auto pending = createNewTable(true);
     //尝试把merged
     if (!pending.table->writeEntries(output)) {
         return false;
     }
+    crashPoint("after_write");
+
     // 先确认文件内容持久化。
     if (!pending.table->sync()) {
          std::cerr << "[ pending.table->sync failed\n";
         return false;
     }
+    crashPoint("after_file_sync");
+
+
     std::error_code ec;
     //不太理解，这里是修改了内存中的名字吗？rename如何影响到磁盘的呢？
     std::filesystem::rename(
@@ -379,6 +397,7 @@ bool StoreEngine::writeFile(const EntryMap& output){
         pending.final_path,
         ec
     );
+    crashPoint("after_rename");
 
     if (ec) {
         std::cerr << "[ rename failed: "
@@ -393,8 +412,21 @@ bool StoreEngine::writeFile(const EntryMap& output){
                   << ec.message() << '\n';
         return false;
     }
+     crashPoint("after_publish");
 
     TableHandle table{pending.final_path, std::move(pending.table)};
     sstables_.push_back(std::move(table));
     return true;
 }
+
+void StoreEngine::sortDigital(std::vector<std::filesystem::path>& files){
+    std::sort(files.begin(), files.end(),
+    [](const auto& a, const auto& b){
+        auto aName = a.filename().string();
+        auto bName = b.filename().string();
+        auto anum = std::string_view(aName).substr(4, aName.size() - 8);
+        auto bnum = std::string_view(bName).substr(4, bName.size() - 8);
+        return anum<bnum;
+    });
+}
+

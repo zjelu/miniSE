@@ -18,6 +18,8 @@
 namespace fs = std::filesystem;
 using Entries = std::map<std::string, Entry, std::less<>>;
 
+
+
 // 不使用 assert：Release 构建中也必须执行检查。
 void require(bool ok, const std::string& message) {
     if (!ok) throw std::runtime_error(message);
@@ -29,7 +31,8 @@ std::vector<fs::path> tables(const fs::path& dir) {
         if (entry.is_regular_file() && entry.path().extension() == ".sst")
             result.push_back(entry.path());
     }
-    std::sort(result.begin(), result.end());
+    sortDigital(result);
+    //std::sort(result.begin(), result.end());
     return result;
 }
 

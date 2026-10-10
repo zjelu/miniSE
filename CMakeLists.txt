@@ -2,6 +2,31 @@ cmake_minimum_required(VERSION 3.16)
 
 project(MiniStoreEngine LANGUAGES CXX)
 
+
+
+add_executable(crash_compaction_test
+    crash_compaction_test.cpp
+    storeEngine.cc
+    compaction.cc
+    SSTable.cc
+    memTable.cc
+    WAL.cc
+)
+
+set_target_properties(crash_compaction_test PROPERTIES
+    CXX_STANDARD 17
+    CXX_STANDARD_REQUIRED YES
+    CXX_EXTENSIONS NO
+)
+
+target_compile_options(crash_compaction_test PRIVATE
+    -Wall -Wextra -Wpedantic
+)
+target_compile_definitions(crash_compaction_test PRIVATE
+    MINISTORE_CRASH_TEST
+)
+
+
 add_executable(compaction_test
     compaction_test.cpp
     storeEngine.cc
@@ -20,6 +45,7 @@ set_target_properties(compaction_test PROPERTIES
 target_compile_options(compaction_test PRIVATE
     -Wall -Wextra -Wpedantic
 )
+
 
 add_executable(sstable_test
     test.cpp

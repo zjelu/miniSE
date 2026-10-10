@@ -3,6 +3,16 @@
 #include <vector>
 
 
+void Compaction::sortDigital(std::vector<std::filesystem::path>& files){
+    std::sort(files.begin(), files.end(),
+    [](const auto& a, const auto& b){
+        auto aName = a.filename().string();
+        auto bName = b.filename().string();
+        auto anum = std::string_view(aName).substr(4, aName.size() - 8);
+        auto bnum = std::string_view(bName).substr(4, bName.size() - 8);
+        return anum<bnum;
+    });
+}
 
 bool Compaction::compacte(const std::string& table_dir) {
     merged.clear();
@@ -19,7 +29,8 @@ bool Compaction::compacte(const std::string& table_dir) {
     }
 
     // 2. 按文件名从旧到新排序。
-    std::sort(files.begin(), files.end());
+    //std::sort(files.begin(), files.end());
+    sortDigital(files);
 
     // 3. 新表后读，让新记录覆盖旧记录。
     for (const auto& path : files) {

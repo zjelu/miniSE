@@ -4,13 +4,15 @@
 #include <map>
 #include <string>
 #include <filesystem>
+#include <vector>
 #include "SSTable.hpp"
 
 class Compaction{
     public:
 
     bool compacte(const std::string& table_dir);
-  
+    void sortDigital(std::vector<std::filesystem::path>& files);
+
 
     const std::map<std::string, Entry, std::less<>>& getMerged(){
         return merged;

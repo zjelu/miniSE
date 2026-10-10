@@ -12,6 +12,16 @@ engine_test_dir=$(mktemp -d)
     cd "$engine_test_dir" &&
     /workspace/IO/miniStoreEgine/build/store_engine_test ./test.wal
 )
+
+cmake -S miniStoreEgine -B miniStoreEgine/build -DCMAKE_BUILD_TYPE=Debug
+cmake --build miniStoreEgine/build --target crash_compaction_test -j
+
+engine_test_dir=$(mktemp -d)
+
+(
+    cd "$engine_test_dir" &&
+    /workspace/IO/miniStoreEgine/build/crash_compaction_test 
+)
 */
 
 int main(int argc, char* argv[]) {
