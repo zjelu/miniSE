@@ -122,3 +122,19 @@ target_include_directories(ministore PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     target_compile_options(ministore PRIVATE -Wall -Wextra -Wpedantic)
 endif()
+
+# Build in a separate Release directory; crash injection is intentionally disabled.
+add_executable(compaction_benchmark
+    compaction_benchmark.cpp
+    storeEngine.cc
+    compaction.cc
+    SSTable.cc
+    memTable.cc
+    WAL.cc
+)
+set_target_properties(compaction_benchmark PROPERTIES
+    CXX_STANDARD 17
+    CXX_STANDARD_REQUIRED YES
+    CXX_EXTENSIONS NO
+)
+target_compile_options(compaction_benchmark PRIVATE -Wall -Wextra -Wpedantic)

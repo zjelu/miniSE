@@ -31,10 +31,7 @@ struct PendingTable {
     std::filesystem::path final_path;
 };
 
-struct TableHandle{
-    std::filesystem::path path;
-    std::unique_ptr<SSTable> table;
-};
+
 
 class StoreEngine{
 using EntryMap = std::map<std::string, Entry, std::less<>>;
@@ -54,8 +51,8 @@ using EntryMap = std::map<std::string, Entry, std::less<>>;
 
     //flush是把memtable写入磁盘
     bool flush();
-    //writeFile是把任意SSTable一个文件写入磁盘
-    bool writeFile(const EntryMap& output);
+    //writeFile是把合并后的SSTable一个文件写入磁盘
+    bool writeCompacteFile(const std::vector<TableHandle>& sstables);
 
 
     std::vector<std::filesystem::path> loadTables(std::string& dir);
@@ -86,6 +83,7 @@ using EntryMap = std::map<std::string, Entry, std::less<>>;
     
     //目录：保存了“文件名 → 文件对象”的关联，这用来持久化同步目录还有对应的文件名关系
     bool syncDirectory(const std::filesystem::path& path);
+    bool removeOldFiles(std::vector<std::filesystem::path> oldPaths);
 
     //存储没有compaction处理的旧目录
     std::vector<std::filesystem::path> oldpaths;

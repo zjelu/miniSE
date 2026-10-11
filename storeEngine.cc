@@ -66,7 +66,6 @@ get(std::string_view key){
     case LookupState::NotFound:
         break;
     }
-
     for (auto it = sstables_.rbegin(); it != sstables_.rend(); ++it) {
         Record record{};
         auto status = it->table->look(key, record);
@@ -294,37 +293,127 @@ bool StoreEngine::syncDirectory(const std::filesystem::path& path) {
     return result == 0;
 }
 
-//只负责合并
-/*bool StoreEngine::merge(
-    const std::vector<std::unique_ptr<SSTable>>& tables,
-    EntryMap& output
-    ){
-        //重置偏移量，方便读取
-        if(::lseek(fd_, 0, SEEK_SET)==-1) return false;
+bool StoreEngine::compacte(){
+    namespace fs = std::filesystem;
 
-        for(auto& table :tables){
-            while (true) {
-                Record record{};
-                auto result = table->readRecord(record);
+    std::vector<fs::path> files;
+    //0.获取oldpath
+     if (sstables_.size() < 2) return true;
 
-                if (result == ReadResult::EndOfFile) {
-                   break;
-                }
+    std::vector<std::filesystem::path> oldPaths;
+    oldPaths.reserve(sstables_.size());
 
-                if (result != ReadResult::Ok) {
-                    return false;
-                }
-                output.insert_or_assign(
-                    record.key,
-                    Entry{record.value, record.isdelete}
-                );
-            }
+    for (const auto& tablehandle : sstables_) {
+        oldPaths.push_back(tablehandle.path); // 复制路径
+    }
+
+    // 1. 收集 SSTable 文件
+    for (const auto& entry : fs::directory_iterator(table_dir_)) {
+        if (!entry.is_regular_file()) continue;
+        if (entry.path().extension() != ".sst") continue;
+
+        files.push_back(entry.path());
+    }
+
+
+   if (!writeCompacteFile(sstables_)) {
+    return false;
+}
+
+    // 切换查询列表、关闭旧表
+    if(!removeOldFiles(oldPaths)){
+        std::cerr<<"failed to remove old files\n";
+        return false;
+    } 
+    return true;
+    
+}
+
+bool StoreEngine::writeCompacteFile(const std::vector<TableHandle>& sstables){
+    auto pending = createNewTable(true);
+
+    if(!compaction.compacte(sstables,*pending.table)){
+        std::cerr<<"compaction compacte failed\n";
+        return false;
+    } 
+    crashPoint("after_write");
+
+    // 先确认文件内容持久化。
+    if (!pending.table->sync()) {
+         std::cerr << "[ pending.table->sync failed\n";
+        return false;
+    }
+    crashPoint("after_file_sync");
+
+    std::error_code ec;
+    std::filesystem::rename(
+        pending.temporary_path,
+        pending.final_path,
+        ec
+    );
+    crashPoint("after_rename");
+
+    if (ec) {
+        std::cerr << "[ rename failed: "
+                  << ec.message() << '\n';
+        return false;
+    }
+
+    // 临时文件和正式文件都位于 table_dir_。
+    // 确认改名这一目录变更持久化。
+    if (!syncDirectory(table_dir_)) {
+        std::cerr << "[ syncDirectory failed: "
+                  << ec.message() << '\n';
+        return false;
+    }
+     crashPoint("after_publish");
+
+    TableHandle table{pending.final_path, std::move(pending.table)};
+    sstables_.push_back(std::move(table));
+    return true;
+}
+
+void StoreEngine::sortDigital(std::vector<std::filesystem::path>& files){
+    std::sort(files.begin(), files.end(),
+    [](const auto& a, const auto& b){
+        auto aName = a.filename().string();
+        auto bName = b.filename().string();
+        auto anum = std::string_view(aName).substr(4, aName.size() - 8);
+        auto bnum = std::string_view(bName).substr(4, bName.size() - 8);
+        return anum<bnum;
+    });
+}
+
+bool StoreEngine::removeOldFiles(std::vector<std::filesystem::path> oldPaths){
+    bool cleanupOk = true;
+    size_t removed = 0;
+    sstables_.erase(sstables_.begin(), sstables_.end() - 1);
+
+    for (const auto& path : oldPaths) {
+        std::error_code ec;
+        std::filesystem::remove(path, ec);
+
+        if (ec) {
+            std::cerr << "[compaction] remove failed: "
+                    << path << ": " << ec.message() << '\n';
+            cleanupOk = false;
+            continue;
         }
-    }*/
+        ++removed;
+        if(removed == 1) crashPoint("after_first_delete");
+    }
+
+    if (!syncDirectory(table_dir_)) {
+        cleanupOk = false;
+    }
+    crashPoint("after_cleanup_sync");
+
+    return cleanupOk;
+}
 
 
 
-bool StoreEngine::compacte() {
+/*bool StoreEngine::compacte_old_version() {
     if (sstables_.size() < 2) return true;
 
     std::vector<std::filesystem::path> oldPaths;
@@ -371,62 +460,5 @@ bool StoreEngine::compacte() {
     crashPoint("after_cleanup_sync");
 
     return cleanupOk;
-}
-
-
-bool StoreEngine::writeFile(const EntryMap& output){
-    auto pending = createNewTable(true);
-    //尝试把merged
-    if (!pending.table->writeEntries(output)) {
-        return false;
-    }
-    crashPoint("after_write");
-
-    // 先确认文件内容持久化。
-    if (!pending.table->sync()) {
-         std::cerr << "[ pending.table->sync failed\n";
-        return false;
-    }
-    crashPoint("after_file_sync");
-
-
-    std::error_code ec;
-    //不太理解，这里是修改了内存中的名字吗？rename如何影响到磁盘的呢？
-    std::filesystem::rename(
-        pending.temporary_path,
-        pending.final_path,
-        ec
-    );
-    crashPoint("after_rename");
-
-    if (ec) {
-        std::cerr << "[ rename failed: "
-                  << ec.message() << '\n';
-        return false;
-    }
-
-    // 临时文件和正式文件都位于 table_dir_。
-    // 确认改名这一目录变更持久化。
-    if (!syncDirectory(table_dir_)) {
-        std::cerr << "[ syncDirectory failed: "
-                  << ec.message() << '\n';
-        return false;
-    }
-     crashPoint("after_publish");
-
-    TableHandle table{pending.final_path, std::move(pending.table)};
-    sstables_.push_back(std::move(table));
-    return true;
-}
-
-void StoreEngine::sortDigital(std::vector<std::filesystem::path>& files){
-    std::sort(files.begin(), files.end(),
-    [](const auto& a, const auto& b){
-        auto aName = a.filename().string();
-        auto bName = b.filename().string();
-        auto anum = std::string_view(aName).substr(4, aName.size() - 8);
-        auto bnum = std::string_view(bName).substr(4, bName.size() - 8);
-        return anum<bnum;
-    });
-}
+}*/
 

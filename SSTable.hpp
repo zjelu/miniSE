@@ -15,6 +15,9 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <memory>
+#include <algorithm>
+#include <cstring>
+
 
 enum class OpenMode {
     CreateNew,
@@ -53,8 +56,6 @@ using EntryMap = std::map<std::string, Entry, std::less<>>;
         }
     }
 
-    
-
     SSTable(const SSTable&) = delete;
     SSTable& operator=(const SSTable&) = delete;
 
@@ -63,7 +64,12 @@ using EntryMap = std::map<std::string, Entry, std::less<>>;
     LookupState look(std::string_view key,Record& record);
 
     bool sync();//首次写完临时的SSTable文件时候选择同步
+
+    //流式合并函数之一，用于读取
     ReadResult readRecord(Record& record);
+    bool writeRecord(const Record& record);
+    //将文件偏移量还有offset都归零
+    bool rewind();
 
 
     private:
@@ -76,11 +82,31 @@ using EntryMap = std::map<std::string, Entry, std::less<>>;
     bool writeDeleteFlag(bool isdelete);
     ReadResult readDeleteFlag(bool& isdelete);
 
-    ReadResult readExact(void* buffer, std::size_t size);
+    ReadResult readExact(void* dst, std::size_t size);
     ReadResult requireField(ReadResult status);
 
-    
-
+    bool appendBytes(const void* data, size_t size);//向内存缓冲区追加字节；必要时触发写出
+    bool flushWriteBuffer();//使用 write() 将缓冲区剩余字节全部写入 fd，处理短写及 EINTR
 
     int fd_=-1;
+    //新添的读缓冲区的设计，这样能够避免直接调用IO读取
+    static constexpr size_t buffer_size = 16*1024;
+    std::vector<char> read_buffer_ = std::vector<char>(buffer_size);
+    size_t read_pos_ = 0;
+    size_t read_end_ = 0;
+
+    //新添一个写缓冲区设计
+
+    std::vector<char> write_buffer_ = std::vector<char>(buffer_size);
+    size_t write_pos =0;//当前buffer中已经写入的字节数
+
+    //让两个写入接口复用编码与长度检查
+    static constexpr std::size_t max_field_length = 16 * 1024 * 1024;
+    bool writeEntry(
+        std::string_view key,
+        std::string_view value,
+        bool isdelete
+    );
+
+
 };

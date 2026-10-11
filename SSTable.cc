@@ -6,20 +6,12 @@
 bool SSTable::writeTable(const MemTable&memtable){
    return writeEntries(memtable.table());
 }
-
 bool SSTable::writeEntries(const EntryMap& entries) {
-    // 复用原 writeTable 中遍历、写长度、标记和内容的逻辑。
-    for (const auto& [key, entry] :entries) {
-    uint32_t keyLength = key.size();
-    uint32_t valueLength = entry.value.size();
-
-    if(!writeUint32LE(keyLength)) return false;
-    if(!writeUint32LE(valueLength)) return false;
-    if(!writeDeleteFlag(entry.isdelete)) return false;
-    if(!writeString(key)) return false;
-    if(!writeString(entry.value)) return false;
+    for (const auto& [key, entry] : entries) {
+        if (!writeEntry(key, entry.value, entry.isdelete)) {
+            return false;
+        }
     }
-
     return true;
 }
 
@@ -28,7 +20,7 @@ bool SSTable::writeEntries(const EntryMap& entries) {
 不应该把它过滤成 NotFound。 否则引擎会继续查询旧表，让被删除的值重新出现*/
 LookupState SSTable::look(std::string_view key,Record& record){
     Record temp{};
-    if (::lseek(fd_, 0, SEEK_SET) == -1) {
+    if (!rewind()) {
     return LookupState::Error;
     }
 
@@ -77,90 +69,30 @@ LookupState SSTable::look(std::string_view key,Record& record){
 
 //写长度
 bool SSTable::writeUint32LE( std::uint32_t length){
-
-    unsigned char bytes[4] = {
+     unsigned char bytes[4] = {
     static_cast<unsigned char>(length),
     static_cast<unsigned char>(length >> 8),
     static_cast<unsigned char>(length >> 16),
     static_cast<unsigned char>(length >> 24)
     };
 
-    std::size_t written = 0;
-    while(written < sizeof(bytes)){
-        ssize_t n = write(
-            fd_,
-            bytes + written,
-            sizeof(bytes) - written
-        );
-
-        if (n > 0) {
-            written += static_cast<std::size_t>(n);
-            continue;
-        }
-
-        if (n == -1 && errno == EINTR) {
-            continue;
-        }
-
-        if (n == -1) {
-            perror("write");
-            return false;
-        }
-        // write() 返回 0：没有取得进展，避免死循环
-        return false;
-    }
-    return true;
+    return appendBytes(bytes, sizeof(bytes));
 }
 
-//写字符串
-bool SSTable::writeString( std::string_view value){
-    std::size_t written = 0;
-    while(written < value.size()){
-        ssize_t n = write(
-            fd_,
-            value.data() + written,
-            value.size() - written
-        );
 
-        if (n > 0) {
-            written += static_cast<std::size_t>(n);
-            continue;
-        }
-
-        if (n == -1 && errno == EINTR) {
-            continue;
-        }
-
-        if (n == -1) {
-            perror("write");
-            return false;
-        }
-        // write() 返回 0：没有取得进展，避免死循环
-        return false;
-    }
-    return true;
+bool SSTable::writeString(std::string_view value)
+{
+    return appendBytes(value.data(), value.size());
 }
 
 bool SSTable::writeDeleteFlag(bool isdelete){
-   
-    while(true){
-        unsigned char flag = isdelete ? 1 : 0;
-        ssize_t n = ::write(fd_, &flag, sizeof(flag));
 
-        if(n>0) return true;
+    unsigned char flag = isdelete ? 1 : 0;
+    return appendBytes(&flag, 1);
 
-        if (n == -1 && errno == EINTR) {
-            continue;
-        }
-        if (n == -1) {
-            perror("write");
-            return false;
-        }
-        // write() 返回 0：没有取得进展，避免死循环
-        return false;
-    }
-    return true;
 }
+
+
 
 //读取4字节长度，统一返回状态，通过引用参数输出结果
 ReadResult SSTable::readUint32LE( std::uint32_t& length){
@@ -223,22 +155,71 @@ ReadResult SSTable::readDeleteFlag(bool& isdelete) {
     return ReadResult::Ok;
 }
 
-ReadResult SSTable::readExact( void* buffer, std::size_t size){
-    auto* dst = static_cast<unsigned char*>(buffer);
+bool SSTable::appendBytes(const void* data, size_t size){
+
+    const char* src = static_cast<const char*>(data);
+
+    //已经从data中拷贝了多少字节
+    size_t offset =0;
+
+    while(offset<size){
+        size_t remaining = size - offset;
+        size_t space =buffer_size - write_pos;
+        size_t to_copy = std::min(space,remaining);
+
+        std::memcpy(write_buffer_.data()+write_pos,src+offset,to_copy);
+        write_pos+=to_copy;
+        offset +=to_copy;
+
+        if (write_pos == buffer_size) {
+        // 此时 buffer 中有 1024 字节有效数据
+            if(!flushWriteBuffer()) return false;         
+            write_pos = 0;           // 重置写入位置，下次从头覆盖
+        }
+    }
+    return true;
+    
+}
+
+ReadResult SSTable::readExact( void* dst, std::size_t size){
+    auto* out = static_cast<unsigned char*>(dst);
     std::size_t total = 0;
 
     while (total < size) {
-        ssize_t n = ::read(fd_, dst + total, size - total);
-
-        if (n > 0) {
-            total += static_cast<std::size_t>(n);
-        } else if (n == 0) {
-            return total == 0
+        if(read_pos_ == read_end_){
+            ssize_t n;
+            do{
+                n=::read(fd_, 
+                    read_buffer_.data(), 
+                    read_buffer_.size()
+                );
+            }while(n<0 && errno ==EINTR);
+            
+            if(n==0){
+                return total == 0
                 ? ReadResult::EndOfFile
                 : ReadResult::Truncated;
-        } else if (errno != EINTR) {
-            return ReadResult::Error;
+            }
+            if(n<0){
+                return ReadResult::Error;
+            }
+            read_pos_ = 0;
+            read_end_ = static_cast<size_t>(n);
         }
+
+        //这段的功能是把内容从读缓冲区的内容传输到输出缓冲区中
+        size_t available = read_end_ - read_pos_;
+        size_t needed = size - total;
+        size_t count = std::min(available, needed);
+
+        std::memcpy(
+            out + total,
+            read_buffer_.data() + read_pos_,
+            count
+        );
+
+        read_pos_ += count;
+        total += count;
     }
     return ReadResult::Ok;
 }
@@ -267,7 +248,6 @@ ReadResult SSTable::readRecord(Record& record){
 
     record = std::move(tmp);
     return ReadResult::Ok;
-
 }
 
 ReadResult SSTable::requireField(ReadResult status){
@@ -283,6 +263,9 @@ ReadResult SSTable::requireField(ReadResult status){
 }
 
 bool SSTable::sync(){
+    if (!flushWriteBuffer())
+        return false;
+
     while (::fsync(fd_) == -1) {
         if (errno == EINTR) continue;
 
@@ -293,5 +276,85 @@ bool SSTable::sync(){
 }
 
 
+bool SSTable::rewind()
+{
+    if (!flushWriteBuffer()) return false;
+
+    if (::lseek(fd_, 0, SEEK_SET) == -1)
+        return false;
+
+    read_pos_ = 0;
+    read_end_ = 0;
+    return true;
+}
+
+//它的任务只需要把所有传入缓冲区的内容写入fd就行了，至于大小则是由append来控制的
+//需要深入理解
+bool SSTable::flushWriteBuffer()
+{
+    std::size_t written = 0;
+    while(written <write_pos){
+        ssize_t n = write(
+            fd_,
+            write_buffer_.data() + written,
+            write_pos - written
+        );
+
+        if (n > 0) {
+            written += static_cast<std::size_t>(n);
+            continue;
+        }
+
+        if (n == -1 && errno == EINTR) {
+            continue;
+        }
+
+        if (n == -1) {
+            perror("write");
+        }
+
+       // 不论返回 -1 还是 0，都保留未写出的后缀。
+        const auto remaining = write_pos - written;
+        std::memmove(
+            write_buffer_.data(),
+            write_buffer_.data() + written,
+            remaining
+        );
+        write_pos = remaining;
+        return false;
+    }
+
+    write_pos=0;
+    return true;
+
+}
+
+
+bool SSTable::writeRecord(const Record& record) {
+    return writeEntry(record.key, record.value, record.isdelete);
+}
+
+
+bool SSTable::writeEntry(
+    std::string_view key,
+    std::string_view value,
+    bool isdelete
+) {
+    // 在写任何字节之前检查。
+    if (key.size() > max_field_length ||
+        value.size() > max_field_length) {
+        return false;
+    }
+
+    if (!writeUint32LE(static_cast<std::uint32_t>(key.size())))
+        return false;
+    if (!writeUint32LE(static_cast<std::uint32_t>(value.size())))
+        return false;
+    if (!writeDeleteFlag(isdelete)) return false;
+    if (!writeString(key)) return false;
+    if (!writeString(value)) return false;
+
+    return true;
+}
 
 

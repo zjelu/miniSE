@@ -31,7 +31,10 @@ std::vector<fs::path> tables(const fs::path& dir) {
         if (entry.is_regular_file() && entry.path().extension() == ".sst")
             result.push_back(entry.path());
     }
-    sortDigital(result);
+    std::sort(result.begin(), result.end(), [](const auto& a, const auto& b) {
+        return std::stoull(a.filename().string().substr(4, 10)) <
+               std::stoull(b.filename().string().substr(4, 10));
+    });
     //std::sort(result.begin(), result.end());
     return result;
 }
@@ -103,14 +106,38 @@ void testOrder(const fs::path& root) {
     // 未发布的 .tmp 文件不应参与合并。
     writeTable(dir / "sst_0000000011.sst.tmp", {{"a", {"wrong", false}}});
     Compaction compaction;
-    require(compaction.compacte(dir.string()), "按编号合并失败");
-    expectEntries(compaction.getMerged(), {{"a", {"latest", false}}, {"gone", {"", true}}});
-    // 同一个 Compaction 对象再次使用时，不能残留上次结果。
+    // 适配流式接口：输入按编号排序，输出放到输入目录之外。
+    auto mergeAndRead = [&](const fs::path& input, const fs::path& outputPath) {
+        std::vector<TableHandle> inputs;
+        for (const auto& path : tables(input)) {
+            inputs.push_back(TableHandle{
+                path, std::make_unique<SSTable>(path.string(), OpenMode::OpenExisting)
+            });
+        }
+        SSTable output(outputPath.string(), OpenMode::CreateNew);
+        require(compaction.compacte(inputs, output), "流式合并失败");
+        require(output.sync(), "同步合并结果失败");
+        require(output.rewind(), "重置输出读取位置失败");
+        Entries actual;
+        std::optional<std::string> previous;
+        while (true) {
+            Record record{};
+            const auto status = output.readRecord(record);
+            if (status == ReadResult::EndOfFile) break;
+            require(status == ReadResult::Ok, "读取合并结果失败");
+            require(!previous || *previous < record.key, "输出乱序或 key 重复");
+            previous = record.key;
+            actual.emplace(record.key, Entry{record.value, record.isdelete});
+        }
+        return actual;
+    };
+    expectEntries(mergeAndRead(dir, root / "order-result.sst"),
+                  {{"a", {"latest", false}}, {"gone", {"", true}}});
     const auto empty = root / "empty-input";
     fs::create_directories(empty);
-    require(compaction.compacte(empty.string()), "空目录合并失败");
-    require(compaction.getMerged().empty(), "上次合并的结果未清空");
-    std::cout << "[PASS] 文件编号顺序、删除标记、忽略 tmp、清空上次结果\n";
+    require(mergeAndRead(empty, root / "empty-result.sst").empty(),
+            "空输入不应残留上次合并结果");
+    std::cout << "[PASS] 文件编号顺序、删除标记、输入过滤 tmp、重复调用空输入\n";
 }
 
 void testEngine(const fs::path& root) {
