@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+#之所以适合用外部脚本组织，是因为测试进程已经故意崩溃了，它无法继续执行自己的后续恢复检查。
+#需要一个仍然运行的外部程序负责再次启动它
 set -euo pipefail
 
 # Usage: ./run_crash_tests.sh /path/to/crash_compaction_test

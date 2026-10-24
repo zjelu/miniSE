@@ -28,7 +28,7 @@ int main(int argc, char* argv[]) {
     mem.put("text", "hello world\nnext line");
     mem.put("large", std::string(10000, 'x'));
 
-    SSTable table(argv[1]);
+    SSTable table(argv[1], OpenMode::CreateNew);
     bool written = table.writeTable(mem);
     assert(written);
 

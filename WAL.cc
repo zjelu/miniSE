@@ -11,7 +11,6 @@ WALLog::WALLog(const std::string& path){
         perror("open AOF");
     }
 }
-
 //单纯的把string写到文件中
 bool WALLog::append(const std::string& record){
        std::string data = record;

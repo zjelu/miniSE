@@ -14,8 +14,6 @@ bool SSTable::writeEntries(const EntryMap& entries) {
     }
     return true;
 }
-
-
 /*STable::look() 返回包含删除标记的记录是正确的，
 不应该把它过滤成 NotFound。 否则引擎会继续查询旧表，让被删除的值重新出现*/
 LookupState SSTable::look(std::string_view key,Record& record){
@@ -46,7 +44,6 @@ LookupState SSTable::look(std::string_view key,Record& record){
         std::cerr << "[lookup] Error: failed to read record\n";
         return LookupState::Error;
     }
-    
     // 只有读取成功后，才打印和比较记录。
     std::cerr << "[record] key=" << std::quoted(temp.key)
               << " key_len=" << temp.lenKey
@@ -59,14 +56,12 @@ LookupState SSTable::look(std::string_view key,Record& record){
         record = std::move(temp);
         return LookupState::Found;
     }
-
     if (temp.key > key) {
         std::cerr << "[lookup] NotFound: passed target key\n";
         return LookupState::NotFound;
     }
 }
 }
-
 //写长度
 bool SSTable::writeUint32LE( std::uint32_t length){
      unsigned char bytes[4] = {
@@ -79,21 +74,15 @@ bool SSTable::writeUint32LE( std::uint32_t length){
     return appendBytes(bytes, sizeof(bytes));
 }
 
-
 bool SSTable::writeString(std::string_view value)
 {
     return appendBytes(value.data(), value.size());
 }
 
 bool SSTable::writeDeleteFlag(bool isdelete){
-
     unsigned char flag = isdelete ? 1 : 0;
     return appendBytes(&flag, 1);
-
 }
-
-
-
 //读取4字节长度，统一返回状态，通过引用参数输出结果
 ReadResult SSTable::readUint32LE( std::uint32_t& length){
     unsigned char bytes[4];
@@ -102,7 +91,6 @@ ReadResult SSTable::readUint32LE( std::uint32_t& length){
     if (result != ReadResult::Ok) {
         return result;
     }
-
     length =
           static_cast<std::uint32_t>(bytes[0])
         | (static_cast<std::uint32_t>(bytes[1]) << 8)
@@ -146,11 +134,9 @@ ReadResult SSTable::readDeleteFlag(bool& isdelete) {
     if (result != ReadResult::Ok) {
         return result;
     }
-
     if (flag > 1) {
         return ReadResult::Error;
     }
-
     isdelete = (flag == 1);
     return ReadResult::Ok;
 }
@@ -177,8 +163,7 @@ bool SSTable::appendBytes(const void* data, size_t size){
             write_pos = 0;           // 重置写入位置，下次从头覆盖
         }
     }
-    return true;
-    
+    return true;   
 }
 
 ReadResult SSTable::readExact( void* dst, std::size_t size){
@@ -217,7 +202,6 @@ ReadResult SSTable::readExact( void* dst, std::size_t size){
             read_buffer_.data() + read_pos_,
             count
         );
-
         read_pos_ += count;
         total += count;
     }
@@ -254,21 +238,17 @@ ReadResult SSTable::requireField(ReadResult status){
     if (status == ReadResult::EndOfFile) {
     return ReadResult::Truncated;
     }
-
     if (status != ReadResult::Ok) {
         return status;
     }
         return status;
-
 }
 
 bool SSTable::sync(){
     if (!flushWriteBuffer())
         return false;
-
     while (::fsync(fd_) == -1) {
         if (errno == EINTR) continue;
-
         perror("fsync SSTable");
         return false;
     }
@@ -299,16 +279,13 @@ bool SSTable::flushWriteBuffer()
             write_buffer_.data() + written,
             write_pos - written
         );
-
         if (n > 0) {
             written += static_cast<std::size_t>(n);
             continue;
         }
-
         if (n == -1 && errno == EINTR) {
             continue;
         }
-
         if (n == -1) {
             perror("write");
         }
@@ -323,17 +300,14 @@ bool SSTable::flushWriteBuffer()
         write_pos = remaining;
         return false;
     }
-
     write_pos=0;
     return true;
-
 }
 
 
 bool SSTable::writeRecord(const Record& record) {
     return writeEntry(record.key, record.value, record.isdelete);
 }
-
 
 bool SSTable::writeEntry(
     std::string_view key,

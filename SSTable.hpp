@@ -17,6 +17,7 @@
 #include <memory>
 #include <algorithm>
 #include <cstring>
+#include <vector>
 
 
 enum class OpenMode {
@@ -96,7 +97,6 @@ using EntryMap = std::map<std::string, Entry, std::less<>>;
     size_t read_end_ = 0;
 
     //新添一个写缓冲区设计
-
     std::vector<char> write_buffer_ = std::vector<char>(buffer_size);
     size_t write_pos =0;//当前buffer中已经写入的字节数
 

@@ -14,62 +14,12 @@ void Compaction::sortDigital(std::vector<std::filesystem::path>& files){
     });
 }
 
-/*bool Compaction::compacte(const std::string& table_dir, SSTable& output) {
-    merged.clear();
-
-    namespace fs = std::filesystem;
-    std::vector<fs::path> files;
-
-    // 1. 收集 SSTable 文件。
-    for (const auto& entry : fs::directory_iterator(table_dir)) {
-        if (!entry.is_regular_file()) continue;
-        if (entry.path().extension() != ".sst") continue;
-
-        files.push_back(entry.path());
-    }
-
-    // 2. 按文件名从旧到新排序。
-    sortDigital(files);
-
-    // 3. 获得sstables
-    std::vector<TableHandle> sstables
-    for (const auto& path : files) {
-        SSTable sstable(path.string(), OpenMode::OpenExisting);
-        sstables.push_back(path.string(),std::make_unique<SSTable>(sstable));
-    }
-
-    //然后合并
-    if(!mergeSortedFiles(sstables,output));
-    return true;
-}*/
-
 bool Compaction::compacte(
     const std::vector<TableHandle>& sstables,
     SSTable& output)
 {
     return mergeSortedFiles(sstables, output);
 }
-
-/*bool Compaction::scanAndCombine(SSTable& table){
-        
-        while (true) {
-        Record record{};
-        auto result = table.readRecord(record);
-
-        if (result == ReadResult::EndOfFile) {
-            return true;
-        }
-
-        if (result != ReadResult::Ok) {
-            return false;
-        }
-
-        merged.insert_or_assign(
-            record.key,
-            Entry{record.value, record.isdelete}
-        );
-    }
-}*/
 
 //为什么内存需求小，因为每次加一条record,就去出一条record，所以内存需求小
 bool Compaction::mergeSortedFiles(
@@ -89,7 +39,6 @@ bool Compaction::mergeSortedFiles(
             id++;
             if (!sstable.table->rewind())
                 return false;
-
             Record record;
             auto result = sstable.table->readRecord(record);
 
@@ -97,12 +46,10 @@ bool Compaction::mergeSortedFiles(
                 std::cerr <<"[SSTablelook] result==ReadResult::EndOfFile\n";
                 continue;
             }
-
             if (result != ReadResult::Ok) {
                 std::cerr << "[lookup] Error: failed to read record\n";
                 return false;
             }
-
             heap.push({
                 std::move(record),
                 id
@@ -111,14 +58,10 @@ bool Compaction::mergeSortedFiles(
 
         //阶段 2：从堆中取出记录，再补充下一条
         std::optional<std::string> last_key;
-
-        
-
         while (!heap.empty()) {
             // 1. 获取并移除堆顶
             HeapNode node = heap.top();
             heap.pop();
-
             // 2. 判断是否重复
             if (!last_key || *last_key != node.record.key) {
                 if(!output.writeRecord(node.record)){
@@ -131,9 +74,7 @@ bool Compaction::mergeSortedFiles(
         // 3. 从刚刚弹出节点所属的 SSTable 读取下一条
             size_t i = node.table_index;
             Record next{};
-
             auto status = sstables[i].table->readRecord(next);
-
             if (status == ReadResult::Ok) {
                 heap.push({std::move(next), i});
             }

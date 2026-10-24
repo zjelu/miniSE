@@ -1,6 +1,0 @@
-PUT a 1
-PUT deleted old
-PUT a 2
-PUT b 3
-DEL deleted
-PUT c 4

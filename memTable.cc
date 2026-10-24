@@ -11,7 +11,6 @@ void MemTable::put(std::string key, std::string value){
     } else {
         memory_usage_ -= it->second.value.size();
         memory_usage_ += value.size();
-
         it->second.value = std::move(value);
         it->second.isdelete = false;
     }
@@ -30,7 +29,6 @@ LookupResult MemTable::lookup(std::string_view key) const {
 
         return {LookupState::NotFound, {}};
     }
-
     if (it->second.isdelete) {
     LOG_DEBUG("[remove] key=%s state=Deleted",
             std::string(key).c_str());
@@ -40,20 +38,6 @@ LookupResult MemTable::lookup(std::string_view key) const {
 
     return {LookupState::Found, it->second.value};
 }
-
-//这个逻辑需要放在storeegine中
-/*std::optional<std::string> MemTable::get(std::string_view key){
-    auto result = memtable.lookup(key);
-    switch (result.state) {
-    case LookupState::Found:
-        return result.value;
-    case LookupState::Deleted:
-        return std::nullopt;
-    case LookupState::NotFound:
-        // 继续查询旧 MemTable 或 SSTable
-        break;
-    }
-}*/
 
 void MemTable::remove(std::string_view key){
     auto it = table_.find(key);
