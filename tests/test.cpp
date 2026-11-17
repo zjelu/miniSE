@@ -1,6 +1,9 @@
 #include "SSTable.hpp"
 #include <cassert>
 #include <iostream>
+#include <map>
+#include <random>
+#include <string>
 
 /*
 # 创建临时目录，不创建文件
@@ -18,6 +21,20 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
+    std::mt19937 rng(42);  // 固定种子
+    std::map<std::string, std::string> expected;
+
+    for (int i = 0; i < 129; ++i) {
+    // 使用固定宽度，让字符串顺序与编号顺序一致。
+        std::string number = std::to_string(i);
+        std::string key = "key_" +
+            std::string(4 - number.size(), '0') + number;
+
+        std::string value = std::to_string(rng());
+        expected.emplace(key, value);
+    }
+
+
     MemTable mem;
     mem.put("apple", "old");
     mem.put("apple", "red");       // 覆盖
@@ -28,14 +45,30 @@ int main(int argc, char* argv[]) {
     mem.put("text", "hello world\nnext line");
     mem.put("large", std::string(10000, 'x'));
 
+    //新加的测试
+    for(auto& data:expected){
+        mem.put(data.first,data.second);
+    }
+    //
+
     SSTable table(argv[1], OpenMode::CreateNew);
-    bool written = table.writeTable(mem);
+    bool written = table.writeTable(mem);//所以这里多了一批新数据
     assert(written);
 
     auto expectValue = [&](const std::string& key,
                            const std::string& expected) {
         Record record{};
         auto status = table.look(key, record);
+        assert(status == LookupState::Found);
+        assert(!record.isdelete);
+        assert(record.key == key);
+        assert(record.value == expected);
+    };
+
+    auto fastexpectValue = [&](const std::string& key,
+                           const std::string& expected) {
+        Record record{};
+        auto status = table.fastLook(key, record);
         assert(status == LookupState::Found);
         assert(!record.isdelete);
         assert(record.key == key);
@@ -50,6 +83,18 @@ int main(int argc, char* argv[]) {
     expectValue("large", std::string(10000, 'x'));
     expectValue("apple", "red");   // 重复查询
 
+    fastexpectValue("banana", "yellow");   // 重复查询
+    fastexpectValue("apple", "red");   // 重复查询
+    fastexpectValue("empty", "");   // 重复查询
+    fastexpectValue("text", "hello world\nnext line");   // 重复查询
+    fastexpectValue("large", std::string(10000, 'x'));   // 重复查询
+    fastexpectValue("apple", "red");   // 重复查询
+
+    for(auto& data:expected){
+        fastexpectValue(data.first, data.second);  
+    }
+
+    
     Record record{};
     auto status = table.look("deleted", record);
     assert(status == LookupState::Found);

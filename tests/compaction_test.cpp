@@ -14,6 +14,7 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+#include <chrono>
 
 namespace fs = std::filesystem;
 using Entries = std::map<std::string, Entry, std::less<>>;
@@ -58,6 +59,16 @@ void writeTable(const fs::path& path, const Entries& entries) {
 // 直接读取磁盘文件，避免 MemTable 或完整 WAL 重放掩盖合并错误。
 void expectDisk(const fs::path& dir, const Entries& expected) {
     const auto files = tables(dir);
+    std::cerr << "[DEBUG] SSTable directory: "
+              << dir << '\n';
+
+    std::cerr << "[DEBUG] SSTable count: "
+              << files.size() << '\n';
+
+    for (const auto& file : files) {
+        std::cerr << "[DEBUG] " << file.filename() << '\n';
+    }
+
     require(files.size() == 1, "合并后应当恰好有一张 SSTable");
     SSTable table(files.front().string(), OpenMode::OpenExisting);
     Entries actual;
@@ -140,6 +151,134 @@ void testOrder(const fs::path& root) {
     std::cout << "[PASS] 文件编号顺序、删除标记、输入过滤 tmp、重复调用空输入\n";
 }
 
+bool waitForSingleTable(
+    const fs::path& dir,
+    std::chrono::milliseconds timeout
+) {
+    const auto deadline =
+        std::chrono::steady_clock::now() + timeout;
+
+    while (std::chrono::steady_clock::now() < deadline) {
+        if (tables(dir).size() == 1) {
+            return true;
+        }
+
+        std::this_thread::sleep_for(
+            std::chrono::milliseconds(10)
+        );
+    }
+
+    return false;
+}
+
+void testBackgroundCompaction(const fs::path& root) {
+    PausePoint point;
+   const auto data = root / "background-engine";
+    StoreEngine engine(data);
+    engine.setPausePoint(&point);
+    const auto dir = data / "sstables";
+
+    // 1. 生成足够多的 SSTable，达到触发阈值
+    for (int i = 0; i < 8; ++i) {
+        require(engine.put("key" + std::to_string(i), "value"),
+                "put failed");
+        require(engine.flush(), "flush failed");
+    }
+
+    // 2. 等待后台合并完成
+    require(
+        waitForSingleTable(dir, std::chrono::seconds(5)),
+        "后台 Compaction 未完成"
+    );
+    // 3. 检查 SSTable 数量
+    require(engine.sstablesSize()==1,"没有把八个文件压缩成一个" );
+    // 4. 验证所有 key 都能够正确查询
+    for (int i = 0; i < 8; ++i) {
+        require(engine.get("key"+std::to_string(i))=="value",std::to_string(i)+"查询错误");
+    }
+    // 5. 验证磁盘上的合并结果
+}
+
+void testBackgroundReopen(const fs::path& root) {
+    StoreEngine engine(root / "background-engine");
+
+    for (int i = 0; i < 8; ++i) {
+        auto key = "key" + std::to_string(i);
+        auto value = engine.get(key);
+
+        require(
+            value.has_value() && *value == "value",
+            "后台合并后重启恢复失败: " + key
+        );
+    }
+}
+
+void testFlushDuringCompaction(
+    const fs::path& root
+){
+   PausePoint point;  // 放在 engine 前面，保证比 engine 更晚析构
+    const auto data = root / "background-engine";
+    StoreEngine engine(data);
+    engine.setPausePoint(&point); 
+
+    const auto dir = data / "sstables";
+
+    // 1. 生成足够多的 SSTable，达到触发阈值
+    for (int i = 0; i < 8; ++i) {
+        require(engine.put("key" + std::to_string(i), "value"),
+                "put failed");
+        require(engine.flush(), "flush failed");
+    }
+    //在后台完成 prepareCompactionLocked()、释放 state_mu_ 后，让后台线程暂停。
+    // 主线程：
+    engine.test_pause_point_->waitUntilReached();//等待后台线程到达暂停点,然后再次执行之后的release
+
+    engine.put("a", "newest");    //然后 flush()，生成第 9 张表。
+    engine.flush();
+    engine.test_pause_point_->release();    //然后 flush()，生成第 9 张表。
+    
+    std::cerr<<engine.sstablesSize()<<std::endl;
+    
+}
+//void testShutdownRecovery(const fs::path& root){}
+
+
+void testShutDown(const fs::path& root){
+    PausePoint point;  // 放在 engine 前面，保证比 engine 更晚析构
+    const auto data = root / "background-engine";
+    std::cerr << "[open] data_dir=" << data << '\n';
+    auto engine = std::make_unique<StoreEngine>(data);
+  
+    engine->setPausePoint(&point); 
+
+    const auto dir = data / "sstables";
+
+    // 1. 生成足够多的 SSTable，达到触发阈值
+    for (int i = 0; i < 8; ++i) {
+        require(engine->put("key" + std::to_string(i), "value"),
+                "put failed");
+        require(engine->flush(), "flush failed");
+    }
+
+    point.waitUntilReached();//等待后台线程到达暂停点,然后再次执行之后的release
+    std::thread closer([&]{
+        engine.reset();
+    });
+
+    point.release();
+    closer.join();
+
+    std::cerr << "[open] data_dir=" << data << '\n';
+    StoreEngine engine1(data);
+    std::cerr<<engine1.sstablesSize()<<std::endl;
+
+    for (int i = 0; i < 8; ++i) {
+         require(engine1.get("key" + std::to_string(i))=="value","第"+std::to_string(i)+"失败");
+    }
+
+}
+
+
 void testEngine(const fs::path& root) {
     const auto data = root / "engine";
     StoreEngine engine(data);
@@ -155,6 +294,7 @@ void testEngine(const fs::path& root) {
     const auto single = tables(dir);
     require(single.size() == 1, "第一次 flush 应生成一张表");
     require(engine.compacte(), "单表合并失败");
+    
     require(tables(dir) == single, "单表合并不应替换文件");
 
     require(engine.put("a", "v2"), "更新 a 失败");
@@ -171,9 +311,19 @@ void testEngine(const fs::path& root) {
     expectQueries(engine, expected);
     const auto old = tables(dir);
     require(old.size() == 3, "第一次多表合并前应有三张表");
+    std::cerr << "[TEST] Before manual compaction\n";
     require(engine.compacte(), "第一次多表合并失败");
+
+    std::cerr << "[TEST] After manual compaction\n";
+
     expectQueries(engine, expected);
     expectDisk(dir, expected);
+
+    std::cerr << "[DEBUG] First manual compaction completed\n";
+
+    expectQueries(engine, expected);
+    expectDisk(dir, expected);
+
     for (const auto& path : old)
         require(!fs::exists(path), "旧表未被删除: " + path.string());
     std::cout << "[PASS] 多版本覆盖、删除、删除后重建、空值、旧表清理、磁盘内容\n";
@@ -185,8 +335,10 @@ void testEngine(const fs::path& root) {
     require(engine.flush(), "合并后 flush 失败");
     require(tables(dir).size() == 2, "合并后 flush 应新增一张表");
     require(engine.compacte(), "第二轮多表合并失败");
-    expectQueries(engine, finalEntries);
-    expectDisk(dir, finalEntries);
+    std::cerr << "[DEBUG] Second manual compaction completed\n";
+expectQueries(engine, finalEntries);
+expectDisk(dir, finalEntries);
+
     std::cout << "[PASS] 空库、单表、重复合并、合并后继续写入并再次合并\n";
 }
 
@@ -202,13 +354,18 @@ int main(int argc, char** argv) {
             require(!fs::exists(root) || fs::is_empty(root), "write 模式只接受全新空目录");
             fs::create_directories(root);
             testOrder(root);
-            testEngine(root);
+            testEngine(root);//
+            //testBackgroundCompaction(root);
+            //testFlushDuringCompaction(root);
+            testShutDown(root);
             std::cout << "[PASS] write 完成，请用相同目录运行 reopen\n";
         } else if (mode == "reopen") {
             require(fs::is_directory(root / "engine" / "sstables"), "缺少 write 阶段数据");
             expectDisk(root / "engine" / "sstables", finalEntries);
             StoreEngine engine(root / "engine");
             expectQueries(engine, finalEntries);
+
+            testBackgroundReopen(root);
             std::cout << "[PASS] 独立进程重启后，磁盘内容和查询结果均正确\n";
         } else {
             throw std::runtime_error("模式必须是 write 或 reopen");

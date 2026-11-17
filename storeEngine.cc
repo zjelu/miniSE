@@ -4,6 +4,9 @@
 #include <filesystem>
 #include <utility>
 
+//类外定义嵌套结构体
+
+
 bool StoreEngine::put(std::string key, std::string value){
     std::ostringstream out;
     out << "PUT " << key << ' ' << value << '\n';
@@ -60,6 +63,8 @@ std::optional<std::string> StoreEngine::
         return std::nullopt;
     case LookupState::NotFound:
         break;
+    case LookupState::Error:
+        throw std::runtime_error("MemTable lookup failed");
     }
     for (auto it = sstables_.rbegin(); it != sstables_.rend(); ++it) {
         Record record{};
@@ -72,6 +77,8 @@ std::optional<std::string> StoreEngine::
                 return std::nullopt;  // 删除标记屏蔽所有更旧的记录
             }
             return record.value;
+        case LookupState::Deleted:
+            return std::nullopt;  // 删除标记屏蔽所有更旧的记录
         case LookupState::NotFound:
             continue;  // 这张表没有，继续查旧表
 
@@ -156,6 +163,9 @@ bool StoreEngine::flushLocked(){
         pending.final_path,
         std::move(pending.table)
     });
+
+    //这里判断是否触发后台压缩
+    requestCompactionLocked();
 
     memtable_.clear();
 
@@ -281,15 +291,32 @@ bool StoreEngine::compacte() {
     // 整个任务串行化，但不阻塞前台的 state_mu_。
     std::lock_guard<std::mutex> task_lock(compaction_mu_);
 
+    
     CompactionPlan plan;
 
     {
         std::lock_guard<std::mutex> lock(state_mu_);
+
+        std::cerr
+            << "[COMPACTION] in-memory SSTables: "
+            << sstables_.size() << '\n';
+
         if (sstables_.size() < 2) {
+             std::cerr
+                << "[COMPACTION] skipped: fewer than 8 tables\n";
             return true;
         }
 
         plan = prepareCompactionLocked();
+    }
+
+  if (test_pause_point_ != nullptr) {
+    test_pause_point_->pause();
+}//手动锁住compaction流程，因为我们要模拟此时前台工作突然插入
+    
+    // 必须在 state_mu_ 锁外调用，测试暂停后台时前台才能继续读写。
+    if (test_hooks_.after_compaction_snapshot) {
+        test_hooks_.after_compaction_snapshot();
     }
 
     // 最耗时的合并、文件同步，不持有 state_mu_。
@@ -546,8 +573,14 @@ void StoreEngine::CompacteWorkloop(){
             compaction_requested_ = false;
         }
         //把耗时间到函数放在锁外
-        if (!compacte()) {
-                std::cerr << "background compaction failed\n";
+        const bool ok = compacte();
+
+        if (!ok) {
+            std::cerr << "background compaction failed\n";
+        }
+
+        if (test_hooks_.after_background_compaction) {
+            test_hooks_.after_background_compaction(ok);
         }
     }
 }

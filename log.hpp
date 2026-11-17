@@ -2,39 +2,49 @@
 
 #include <cstdio>
 
-enum LogLevel {
-    LOG_ERROR = 0,
-    LOG_WARN  = 1,
-    LOG_INFO  = 2,
-    LOG_DEBUG = 3
+enum class LogLevel {
+    Error = 0,
+    Warn  = 1,
+    Info  = 2,
+    Debug = 3
 };
-static LogLevel CURRENT_LOG_LEVEL = LOG_DEBUG;
 
+// C++17 inline 变量
+inline LogLevel CURRENT_LOG_LEVEL = LogLevel::Debug;
 
-#define LOG_INFO(fmt, ...) \
+// 使用 __VA_ARGS__ 接收完整 printf 参数
+#define LOG_INFO(...) \
     do { \
-        if (CURRENT_LOG_LEVEL >= LOG_INFO) { \
-            printf("[INFO ] " fmt "\n", ##__VA_ARGS__); \
+        if (CURRENT_LOG_LEVEL >= LogLevel::Info) { \
+            std::printf("[INFO ] "); \
+            std::printf(__VA_ARGS__); \
+            std::printf("\n"); \
         } \
     } while (0)
 
-#define LOG_DEBUG(fmt, ...) \
+#define LOG_DEBUG(...) \
     do { \
-        if (CURRENT_LOG_LEVEL >= LOG_DEBUG) { \
-            printf("[DEBUG] " fmt "\n", ##__VA_ARGS__); \
+        if (CURRENT_LOG_LEVEL >= LogLevel::Debug) { \
+            std::printf("[DEBUG] "); \
+            std::printf(__VA_ARGS__); \
+            std::printf("\n"); \
         } \
     } while (0)
 
-#define LOG_ERROR(fmt, ...) \
+#define LOG_ERROR(...) \
     do { \
-        if (CURRENT_LOG_LEVEL >= LOG_ERROR) { \
-            printf("[ERROR] " fmt "\n", ##__VA_ARGS__); \
+        if (CURRENT_LOG_LEVEL >= LogLevel::Error) { \
+            std::printf("[ERROR] "); \
+            std::printf(__VA_ARGS__); \
+            std::printf("\n"); \
         } \
     } while (0)
-    
-#define LOG_WARN(fmt, ...) \
-        do { \
-            if (CURRENT_LOG_LEVEL >= LOG_WARN) { \
-                printf("[WARN] " fmt "\n", ##__VA_ARGS__); \
-            } \
-        } while (0)
+
+#define LOG_WARN(...) \
+    do { \
+        if (CURRENT_LOG_LEVEL >= LogLevel::Warn) { \
+            std::printf("[WARN ] "); \
+            std::printf(__VA_ARGS__); \
+            std::printf("\n"); \
+        } \
+    } while (0)

@@ -47,7 +47,7 @@ bool SSTableMeta:: rebuildMetadata(
     const std::filesystem::path& sstable_dir,
     std::vector<SSTableMeta>& metas){
 
-    }
+}
         //遍历 SSTable，读取 Record，每隔 128 条生成一个索引项。  
         
 

@@ -15,6 +15,42 @@
 #include <mutex>
 #include <thread>
 #include <condition_variable>
+#include <functional>
+
+ struct PausePoint{
+        std::mutex mu;
+        std::condition_variable cv;
+
+        bool reached = false;
+        bool resume = false;
+       // cv.wait(lock, predicate) 在进入等待状态时，会主动释放 lock 持有的互斥锁！
+       //所以不会存在一个函数抱着一个锁进行循环
+        void pause(){
+            std::unique_lock<std::mutex> lock(mu);
+            reached = true;
+            cv.notify_all();
+
+            cv.wait(lock,[&]{
+                return resume;
+            });
+        }
+
+        void waitUntilReached() {
+            std::unique_lock<std::mutex> lock(mu);
+
+            cv.wait(lock, [&] {
+                return reached;
+            });
+        }
+
+        void release() {
+            {
+                std::lock_guard<std::mutex> lock(mu);
+                resume = true;
+            }
+            cv.notify_all();
+        }
+    };
 
 //实现并发需要一个后台线程后台 compaction 则适合由引擎自己管理。 因为它的触发条件、输入文件、发布和清理流程都是引擎内部的职责。
 struct PendingTable {
@@ -28,11 +64,18 @@ struct CompactionPlan {
     PendingTable output;
 };
 
+struct EngineTestHooks {
+    std::function<void()> after_compaction_snapshot;
+    std::function<void(bool)> after_background_compaction;
+};
+
 class StoreEngine{
 using EntryMap = std::map<std::string, Entry, std::less<>>;
 
     public:
-    explicit StoreEngine(const std::filesystem::path& dataDir){
+    explicit StoreEngine(const std::filesystem::path& dataDir,
+    EngineTestHooks hooks = {}):
+    test_hooks_(std::move(hooks)){
        if (!open(dataDir.string())) {
        throw std::runtime_error("StoreEngine initialization failed");
        }
@@ -52,6 +95,7 @@ using EntryMap = std::map<std::string, Entry, std::less<>>;
     if (compaction_thread_.joinable()) {
         compaction_thread_.join();
     }
+    
 }
 
     bool put(std::string key, std::string value);
@@ -62,11 +106,14 @@ using EntryMap = std::map<std::string, Entry, std::less<>>;
 
     //flush是把memtable写入磁盘
     bool flush();
+    int sstablesSize(){
+        std::lock_guard<std::mutex> lock(compaction_mu_);
+        return sstables_.size();
+    }
     
 
     //writeFile是把合并后的SSTable一个文件写入磁盘
     bool writeCompacteFile(const std::vector<TableHandle>& sstables);
-
 
     std::vector<std::filesystem::path> loadTables(std::string& dir);
      std::string formatId(uint64_t id);
@@ -83,6 +130,7 @@ using EntryMap = std::map<std::string, Entry, std::less<>>;
 
     bool compacte();
 
+
 private:
     MemTable memtable_;
     std::unique_ptr<WALLog> wal_;
@@ -93,6 +141,7 @@ private:
     std::filesystem::path data_dir_;//类似test-data
     std::filesystem::path table_dir_;//类似test-data/sstables
     std::uint64_t next_file_id_ = 0;
+
 
     //flush是把memtable写入磁盘
    
@@ -126,6 +175,18 @@ private:
     void CompacteWorkloop();
     void requestCompactionLocked();
 
+    //test
+    EngineTestHooks test_hooks_;
 
+    public:
+    
+    PausePoint* test_pause_point_ = nullptr;
+    void setPausePoint(PausePoint* point){
+        test_pause_point_=point;
+    }
+
+    void reset(){
+
+    }
 };
 

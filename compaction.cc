@@ -25,7 +25,7 @@ bool Compaction::compacte(
 bool Compaction::mergeSortedFiles(
         const std::vector<TableHandle>& sstables,
         SSTable& output){
-        int id=-1;
+        size_t id=-1;
 
         std::priority_queue<
             HeapNode,
@@ -79,8 +79,13 @@ bool Compaction::mergeSortedFiles(
                 heap.push({std::move(next), i});
             }
             else if (status != ReadResult::EndOfFile) {
+                std::cerr << "[merge] read next failed"
+          << " table=" << sstables[i].path
+          << " status=" << static_cast<int>(status)
+          << '\n';
                 return false;
             }
+
         }
-        return true;
+        return output.finish();
 }

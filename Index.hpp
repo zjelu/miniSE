@@ -4,6 +4,18 @@
 
 //不需要创建一个新类
 //去对应的文件，对应的偏移量来读取内容
+/*
+在这个简化模型中，查询过程是：
+1. 在内存索引中二分查找目标 Key 所属区间。
+2. 获得对应的 SSTable 文件偏移量。
+3. 使用 lseek() 定位到指定位置。
+4. 顺序读取少量记录，直到找到目标 Key 或确定它不存在。
+
+1	为 SSTable 建立内存稀疏索引	数据结构、文件偏移量
+2	修改 SSTable::look() 使用索引	二分查找、文件定位
+3	对比优化前后的查询性能	Benchmark、性能分析
+*/
+
 #pragma once;
 #include <cstdint>
 #include <cstddef>
@@ -14,28 +26,20 @@
 
 class SSTableMetas{
     public:
-
-    struct IndexEntry {
-        std::string key;
-        uint64_t offset;
-    };
-
 //一个SSTableMeta对应一个文件
     struct SSTableMeta {
         uint64_t generation;
         std::string min_key;
         std::string max_key;
-        std::filesystem::path;
-        std::vector<IndexEntry> sparse_index;
     };
 
     //尝试把恢复数据写入saveMetadata
-    //这里的path对应的是sstable_meta文件
+    //这里的path对应的是sstable_meta文件，把内容写入sstable_meta文件
     bool saveMetadata(
         const std::vector<SSTableMeta>& metas,
         const std::filesystem::path& path);
 
-    //从磁盘恢复索引与文件元数据
+    //从磁盘恢复索引与文件元数据，回复一个vector<SSTableMeta>
     bool loadMetadata(
         const std::filesystem::path& path,
         std::vector<SSTableMeta>& metas);

@@ -82,19 +82,23 @@ function(add_ministore_program target source library)
 endfunction()
 
 add_ministore_program(
-    compaction_test compaction_test.cpp ministore_core
+    compaction_test tests/compaction_test.cpp ministore_core
 )
 
 add_ministore_program(
-    restart_test restart_test.cpp ministore_core
+    restart_test tests/restart_test.cpp ministore_core
 )
 
 add_ministore_program(
-    store_engine_test storeEngine_test.cpp ministore_core
+    store_engine_test tests/storeEngine_test.cpp ministore_core
 )
 
 add_ministore_program(
-    sstable_test test.cpp ministore_core
+    sstable_test tests/test.cpp ministore_core
+)
+
+add_ministore_program(
+    recoveryTest tests/recoveryTest.cpp ministore_core
 )
 
 add_ministore_program(
@@ -133,6 +137,19 @@ register_ministore_test(compaction_test restart)
 register_ministore_test(restart_test restart)
 register_ministore_test(store_engine_test engine)
 register_ministore_test(sstable_test sstable)
+register_ministore_test( recoveryTest engine)
 
 # crash_compaction_test 仍由原来的崩溃测试脚本驱动。
 # compaction_benchmark 是性能测试，不注册进普通 CTest。
+
+add_ministore_program(
+    background_compaction_test
+    background_compaction_test.cpp
+    ministore_core
+)
+
+register_ministore_test(background_compaction_test engine)
+
+set_tests_properties(background_compaction_test PROPERTIES
+    TIMEOUT 120
+)
